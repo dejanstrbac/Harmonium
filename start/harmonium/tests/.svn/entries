@@ -1,0 +1,54 @@
+8
+
+dir
+67
+http://harmonium.rubyforge.org/svn/tags/start/harmonium/tests
+http://harmonium.rubyforge.org/svn
+
+
+
+2005-02-05T01:47:16.000000Z
+26
+dido
+
+
+svn:special svn:externals svn:needs-lock
+
+
+
+
+
+
+
+
+
+
+
+b80ca781-5f1f-0410-bd66-cb50d0bd1263
+
+nodetest.rb
+file
+
+
+
+
+2009-06-11T22:13:18.000000Z
+78429ca9f560079e37bd4778b11e995f
+2005-02-05T01:47:16.000000Z
+26
+dido
+has-props
+
+nodetest2.rb
+file
+
+
+
+
+2009-06-11T22:13:18.000000Z
+a673213d6fe8da22373ebf45f85e7a48
+2005-02-05T01:47:16.000000Z
+26
+dido
+has-props
+

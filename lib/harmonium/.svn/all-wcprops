@@ -1,0 +1,47 @@
+K 25
+svn:wc:ra_dav:version-url
+V 46
+/svn/!svn/ver/61/trunk/harmonium/lib/harmonium
+END
+util.rb
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/!svn/ver/57/trunk/harmonium/lib/harmonium/util.rb
+END
+chord.rb
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/!svn/ver/57/trunk/harmonium/lib/harmonium/chord.rb
+END
+remote_node.rb
+K 25
+svn:wc:ra_dav:version-url
+V 61
+/svn/!svn/ver/61/trunk/harmonium/lib/harmonium/remote_node.rb
+END
+node_array.rb
+K 25
+svn:wc:ra_dav:version-url
+V 60
+/svn/!svn/ver/61/trunk/harmonium/lib/harmonium/node_array.rb
+END
+node.rb
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/!svn/ver/61/trunk/harmonium/lib/harmonium/node.rb
+END
+dhash.rb
+K 25
+svn:wc:ra_dav:version-url
+V 55
+/svn/!svn/ver/52/trunk/harmonium/lib/harmonium/dhash.rb
+END
+madeleine_storage.rb
+K 25
+svn:wc:ra_dav:version-url
+V 67
+/svn/!svn/ver/46/trunk/harmonium/lib/harmonium/madeleine_storage.rb
+END

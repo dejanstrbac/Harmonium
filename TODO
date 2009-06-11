@@ -1,0 +1,14 @@
+Just a simple reminder...
+
+ * Use the calculated nodeids to optimize routing, for example by making Harmonium::Node#closest_preceding_node(nodeid) take
+   shortcuts if possible.
+ * Implement all the different parts of DHash in Chord.
+   * Implement a class Harmnium::DHashNode < Harmonium::Node
+     * Implement Harmonium::DHashNode#get_successor_list(n) (see http://pdos.csail.mit.edu/papers/chord:cates-meng.pdf)
+     * Implement Harmonium::DHashNode#lookup(k,n) (see http://pdos.csail.mit.edu/papers/chord:cates-meng.pdf)
+     * Implement erasure coding (see Rabin, M. Efficient dispersal of information for security, load balancing, and fault tolerance. Journal of the ACM 36, 2 (Apr. 1989), 335-348.)
+     * Implement Harmonium::DHashNode#put(k,v) and Harmonium::DHashNode#get(k) (see http://pdos.csail.mit.edu/papers/chord:cates-meng.pdf)
+     * Implement global DHash maintenance (see http://pdos.csail.mit.edu/papers/chord:cates-meng.pdf)
+     * Implement local DHash maintenance (see http://pdos.csail.mit.edu/papers/chord:cates-meng.pdf)
+       * Implement DHash database synchronization (see http://pdos.csail.mit.edu/papers/chord:cates-meng.pdf)
+ * Implement automated tests for testing performance and functionality against real remote running servers.

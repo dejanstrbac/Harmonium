@@ -1,0 +1,41 @@
+8
+
+dir
+67
+http://harmonium.rubyforge.org/svn/branches/dido/harmonium/harmonium
+http://harmonium.rubyforge.org/svn
+
+
+
+2005-02-05T01:47:18.000000Z
+28
+
+
+
+svn:special svn:externals svn:needs-lock
+
+
+
+
+
+
+
+
+
+
+
+b80ca781-5f1f-0410-bd66-cb50d0bd1263
+
+harmonium.rb
+file
+
+
+
+
+2009-06-11T22:13:17.000000Z
+62191a635265ad2330238489155e9fb4
+2005-02-05T01:47:18.000000Z
+27
+dido
+has-props
+

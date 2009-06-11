@@ -1,0 +1,68 @@
+#!/usr/bin/ruby
+#
+# Copyright (C) 2005 Rafael Sevilla
+# This file is part of Harmonium
+#
+# Harmonium is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# Harmonium is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with the Harmonium; if not, write to the Free
+# Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+# 02111-1307 USA.
+#
+# Unit tests for Harmonium Chord nodes
+#
+# $Id$
+
+require File.join(File.dirname(__FILE__), 'test_helper')
+require 'harmonium'
+
+class NodeArraTest < Test::Unit::TestCase
+  HOST = "127.0.0.1"
+  INITPORT = 4096
+  NUMNODES = 32
+
+  def setup
+    @nodelist = Harmonium::NodeArray.new
+  end
+  
+  def teardown
+    @nodelist.each do |n|
+      n.drb.stop_service() unless n.nil?
+    end
+    DRb.stop_service
+  end
+
+  def test_add_delete
+    n = Harmonium::Node.new("druby://#{HOST}:#{INITPORT + 4}")
+
+    assert(@nodelist.compact.empty?)
+    @nodelist[4] = n
+    assert(!@nodelist.empty?)
+    assert_equal(n, @nodelist[4])
+    assert_equal(n, @nodelist[n.nodeid])
+
+    @nodelist.delete(4)
+
+    assert(@nodelist.compact.empty?)
+    @nodelist[5] = n
+    @nodelist[3] = n
+    assert(!@nodelist.empty?)
+    assert_equal(n, @nodelist[5])
+    assert_equal(n, @nodelist[3])
+    assert_equal(n, @nodelist[n.nodeid])
+
+    @nodelist.delete(n.nodeid)
+
+    assert(@nodelist.compact.empty?)
+  end
+
+end

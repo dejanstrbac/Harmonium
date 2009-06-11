@@ -1,0 +1,397 @@
+#!/usr/bin/ruby
+#
+# Copyright (C) 2005 Rafael Sevilla
+# This file is part of Harmonium
+#
+# Harmonium is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# Harmonium is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with the Harmonium; if not, write to the Free
+# Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+# 02111-1307 USA.
+#
+# Harmonium, a Chord implementation in Ruby
+#
+# See the paper: "Chord: A Scalable Peer-to-peer Lookup Protocol for
+# Internet Applications" by Ion Stoica, Robert Morris, David Liben-Nowell,
+# David R. Karger, M. Frans Kaashoek, Frank Dabek, and Hari Balakrishnan
+# for more details on how all of this is supposed to work.
+# http://pdos.lcs.mit.edu/chord/papers/paper-ton.pdf
+# 
+# $Id: node.rb 61 2006-10-23 18:03:18Z zond $
+#
+
+require 'drb'
+require 'digest/sha1'
+require 'matrix'
+require 'pp'
+
+module Harmonium
+  # Standard Chord constants
+  KEY_BITS = 160                # SHA-1 bits
+  MAX_LEN = (KEY_BITS / 4)      # hex characters, 4 bits each char
+  KEY_MASK = (1 << KEY_BITS) - 1
+  FS_RETRIES = 10 # number of times to retry after failure in find_successor
+  FS_INITDELAY = 10 # initial number of seconds to wait before retrying
+
+  # Synthetic coordinate constants
+  COORDINATE_DIMENSIONS = 5 # number of dimensions in synthetic coordinates
+  INITIAL_COORDINATE_DELTA_FRACTION = 1.0 # the fraction of the error to correct the first time unit
+  COORDINATE_DELTA_FRACTION_PRIM = 0.025 # the rate at which the fraction decreases
+  MINIMUM_DELTA_FRACTION = 0.05 # the minimum allowed fraction
+  MAX_COORDINATE_MEAN_ERRORS = 10 # the number of last coordinate errors to store for statistics
+
+  # This exception is used for node errors.
+  class NodeError < RuntimeError
+    attr :transient             # mark whether the error is transient
+
+    def initialize(t)
+      @transient = t
+    end
+  end
+
+  # This is the definition of a local Chord node
+  class Node
+
+    # What kind of RemoteNode will we use?
+    # Only for testing purposes, really.
+    @@remote_node_class = Harmonium::RemoteNode
+    def self.remote_node_class
+      @@remote_node_class
+    end
+    def self.remote_node_class=(c)
+      @@remote_node_class = c
+    end
+
+    # Does this ruby instance want to validate nodeids from remote
+    # nodes?
+    @@validate_nodeid = true
+    def self.validate_nodeid?
+      @@validate_nodeid
+    end
+    def self.validate_nodeid=(setting)
+      @@validate_nodeid = setting
+    end
+
+    # Does this ruby instance spend time improving synthetic coordinates
+    # of its Nodes?
+    @@calculate_coordinates = true
+    def self.calculate_coordinates?
+      @@calculate_coordinates
+    end
+    def self.calculate_coordinates=(setting)
+      @@calculate_coordinates = setting
+    end
+
+    attr_reader :uri, :nodeid, :drb
+    attr_reader :pred, :succ
+    attr_reader :finger		# debugging
+    attr_reader :coordinates, :coordinate_updates, :coordinate_delta_fraction, :coordinate_mean_errors
+
+    include DRbUndumped
+
+    #
+    # If we initialize with a URI we can choose any protocol we like to.
+    #
+    def initialize(uri)
+      # Save our uri for future use
+      @uri = uri
+
+      # Calculate the nodeid
+      @nodeid = Digest::SHA1.new(uri).to_s[0...MAX_LEN]
+ 
+      # Start accepting drb connections
+      @drb = DRb::DRbServer.new(uri, self)
+
+      # Our coordinates are initially at a more or less random spot
+      @coordinates = Vector[*Array.new(COORDINATE_DIMENSIONS).collect do |e|
+                              rand - 0.5
+                            end]
+      # The fraction of the coordinate delta that we correct next time step
+      @coordinate_delta_fraction = INITIAL_COORDINATE_DELTA_FRACTION
+      # Our last MAX_COORDINATE_MEAN_ERRORS errors
+      @coordinate_mean_errors = []
+      @coordinate_mean_error_cache = nil
+      # The number of times we have adjusted our coordinates
+      @coordinate_updates = 0
+
+      # Initially, we have no predecessor
+      @pred = nil
+
+      # Our successor is initially just ourself
+      @succ = @@remote_node_class.new(self)
+
+      # Our finger table is initially empty
+      @finger = NodeArray.new
+      @fingeridx = 0
+
+    end
+
+    #
+    # Refine our coordinates so that the distance between us
+    # and the given +coordinates+ resemble +distance+.
+    #
+    def update_coordinates(other_coordinates, distance)
+      # unit vector towards other host
+      distance_from_me = other_coordinates - @coordinates
+      dir_from_me = distance_from_me * (1 / distance_from_me.r)
+      
+      # distance from rest position
+      distance_to_rest = distance_from_me.r - distance
+      
+      # displacement from rest position
+      adjustment = dir_from_me * distance_to_rest
+      @coordinates += adjustment * @coordinate_delta_fraction 
+
+      # store the relative error (the diff between actual and measured distance / measured distance) 
+      # in the error array for statistic purposes
+      @coordinate_mean_errors << distance_to_rest.abs / distance
+      @coordinate_mean_error_cache = nil
+      # make sure that the error array is small enough
+      while @coordinate_mean_errors.size > MAX_COORDINATE_MEAN_ERRORS
+        @coordinate_mean_errors.shift
+      end
+
+      @coordinate_delta_fraction -= COORDINATE_DELTA_FRACTION_PRIM unless @coordinate_delta_fraction < MINIMUM_DELTA_FRACTION
+      @coordinate_updates += 1
+    end
+
+    #
+    # Mean error for the last MAX_COORDINATE_MEAN_ERRORS updates
+    #
+    def mean_error
+      unless @coordinate_mean_error_cache
+        if @coordinate_mean_errors.size < MAX_COORDINATE_MEAN_ERRORS
+          @coordinate_mean_error_cache = nil
+        else
+          @coordinate_mean_error_cache = @coordinate_mean_errors.inject(0) do |sum, error|
+            sum + error
+          end.to_f / @coordinate_mean_errors.size
+        end
+      end
+      @coordinate_mean_error_cache
+    end
+
+    #
+    # Enable calling all our defined methods with an extra paramter,
+    # an Array with the id and coordinates of the caller.
+    # The return value will also be put in a 3-element array where the 
+    # second value is our own coordinates and the third the time we
+    # spent performing the method called.
+    #
+    def method_missing(sym, *args)
+      if self.class.calculate_coordinates?
+        if (m = sym.to_s.match(/^_coord_(.*)$/))
+          if respond_to?(m[1])
+            meth = method(m[1])
+            if meth.arity == args.size - 1
+              caller_id, caller_coordinates = args.pop
+
+              @finger[caller_id].coordinates = caller_coordinates if @finger.include?(caller_id)
+              @succ.coordinates = caller_coordinates if @succ && @succ.nodeid == caller_id
+              @pred.coordinates = caller_coordinates if @pred && @pred.nodeid == caller_id
+
+              start_time = Time.new
+              rval = [meth.call(*args), coordinates]
+              perform_time = (Time.new - start_time).to_f
+              rval << perform_time
+              return rval
+            end
+          end
+        end
+      end
+      return super
+    end
+
+    # Search the local finger table for the highest predecessor of id.
+    # This is used for faster searching.
+    def closest_preceding_node(id)
+      (KEY_BITS-1).downto(0) do |i|
+        unless @finger[i].nil?
+          # Now, we go down the finger table until we find a finger
+          # table entry whose node ID is between our node ID and the
+          # ID being searched for.
+          if (Util.between_oo(@finger[i].nodeid, @nodeid, id))
+            return(@finger[i])
+          end
+        end
+      end
+      
+      # Give up, and just return our successor as the closest
+      # preceding node we can find
+      return(@succ)
+    end
+
+    # We are asked to find the successor of the key id.
+    def find_succ(id)
+      # Simple sanity check
+      if id == @nodeid
+        return @@remote_node_class.new(self)
+      end
+      # First determine if it is between ourself and our successor.
+      if Util.between_oc(id, @nodeid, @succ.nodeid)
+        # If it is, our successor is the successor of id
+        return(@succ)
+      else
+        # If not, find the closest preceding node from the local
+        # finger table and recursively ask it the same thing.  Because
+        # of the way finger tables are constructed this ought to
+        # eventually converge to the actual successor.
+        sleeptime = FS_INITDELAY
+        ex = nil
+        1.upto(FS_RETRIES) do
+          np = closest_preceding_node(id)
+          begin
+            return(np.find_succ(id))
+          rescue Exception => e
+            # If the call fails, we remove it from our finger table if it is there, 
+            # wait a little while then retry
+            @finger.delete(np.nodeid) if @finger.include?(np.nodeid)
+            sleep(sleeptime)
+            # Wait a little longer next time, with exponential backoff.
+            # This may give the finger table entries the time they need
+            # to refresh.
+            sleeptime *= 2
+            ex = e
+          end
+        end
+        # after we reach the error limit, we raise a NodeError
+        raise NodeError.new(true), "search failure, no peers could be contacted, #{ex.message}"
+      end
+    end
+
+    # Respond with "pong" for pings.
+    def ping
+      return("pong")
+    end
+
+    # Given the address of a known Chord node running on IP address, join the ring it is part of.
+    def join(uri)
+      mn = DRbObject.new_with_uri(uri)
+      begin
+        new_succ = mn.find_succ(@nodeid).clone
+        new_succ.holder = self
+        @succ = new_succ
+      rescue Exception => e
+        raise NodeError.new(true), "could not contact specified peer #{uri}, #{e.message}"
+      end
+    end
+
+    # Node n thinks it might be our predecessor.  Check to see whether it
+    # might be right and update as needed.  Return true if we actually
+    # updated our predecessor link.
+    def notify(n)
+      # Make sure that this @@remote_node_class knows its holder
+      n.holder = self
+
+      # If we don't know our predecessor, then any notification is probably
+      # correct.
+      if @pred.nil?
+        @pred = n
+        return(true)
+      end
+
+      # If we do have a known predecessor, check whether it is responsive.
+      begin
+        # Try to get the node ID of our predecesor
+        pn = @pred.nodeid
+      rescue Exception => e
+        # In this case, our known predecessor has failed, so we accept the
+        # notification without further checking (we don't have a known live
+        # predecessor then)
+        @pred = n
+        return(true)
+      end
+
+      # Now that we know our current predecessor is alive, check to see
+      # whether the notifier actually has a node id between our known
+      # predecessor and ourself.  If so, it is a better predecessor
+      # and we accept it.
+      if Util.between_oo(n.nodeid, pn, @nodeid)
+        @pred = n
+        return(true)
+      end
+      # We did not accept the notification
+      return(false)
+    end
+    
+    # Called periodically, this method verifies the node's immediate
+    # successor, and tells the successor about itself.
+    def stabilize
+      # Get our current successor's known predecessor
+      begin
+        x = @succ.pred
+      rescue Exception => e
+        # If our current successor has failed, then try to find
+        # another successor using our current finger table.
+        begin
+          @succ = find_succ(@nodeid)
+        rescue NodeError => ne
+          # if there was a node error finding a new successor, we are
+          # SOL. :(
+          raise NodeError.new(false), "stabilization failure #{ne.message}"
+        end
+      end
+
+      # See whether the successor is actually there
+      begin
+        x.ping unless x.nil?
+      rescue Exception => ex
+        # If there was an error, our successor's predecessor is NOT
+        # valid, so we attempt to notify our successor.
+        x = nil
+      end
+
+      # If our successor has a valid predecessor, check to see whether
+      # the predecessor's node ID is between our node ID and our
+      # current successor's node ID.  If it is, then it should be our
+      # successor.
+      if (!x.nil? && Util.between_oo(x.nodeid, @nodeid, @succ.nodeid))
+        @succ = x
+      end
+
+      # In either case, notify our successor, new or old, saying 
+      # that we might be their proper predecessor.
+      @succ.notify(@@remote_node_class.new(self))
+    end
+
+    # Called periodically, this method will refresh finger table entries
+    def fix_fingers
+      begin
+        r = find_succ(Util.fingerval(@nodeid,
+                                     @fingeridx))
+        @finger[@fingeridx] = r
+        @fingeridx += 1
+        @fingeridx %= KEY_BITS
+      rescue Exception => e
+        # If some error occurred, set the new index to nil
+        # and DO NOT INCREMENT THE CURRENT INDEX.
+        @finger[@fingeridx] = nil
+      end
+      return(@fingeridx)
+    end
+
+    # Called periodically, checks whether predecessor has failed
+    def check_predecessor
+      begin
+        pingval = @pred.ping
+      rescue Exception => e
+        # if the ping call failed, we set the predecessor to nil
+        pingval = nil
+      end
+
+      if pingval != "pong"
+        @pred = nil
+      end
+    end
+  end
+
+end
